@@ -13,7 +13,7 @@ from dask.distributed import Client, LocalCluster, progress
 from data_processing.file_paths import file_paths
 from data_processing.gpkg_utils import get_cat_from_gage_id, get_table_crs
 from data_processing.graph_utils import get_upstream_ids
-from map_app.views import get_upstream_geometry
+from map_app.views import get_upstream_geometry, get_catid_from_point
 from pyarrow import compute as pa_compute
 from pyarrow import csv as pa_csv
 from pyarrow import parquet as pa_parquet
@@ -26,6 +26,14 @@ def process_station(row):
     try:
         catids = get_cat_from_gage_id(station_id)
         upstream_ids = get_upstream_ids(catids)
+        return get_upstream_geometry(upstream_ids)
+    except TypeError:
+        # lng lat
+        lat = row["dec_lat_va"]
+        lng = row["dec_long_va"]
+        coords = {"lat": lat, "lng": lng}
+        cat_id = get_catid_from_point(coords)
+        upstream_ids = get_upstream_ids([cat_id])
         return get_upstream_geometry(upstream_ids)
     except:
         return None
@@ -113,6 +121,13 @@ def process_station2(row):
     try:
         catids = get_cat_from_gage_id(station_id)
         upstream_ids = get_upstream_ids(catids)
+    except TypeError:
+        # lng lat
+        lat = row["dec_lat_va"]
+        lng = row["dec_long_va"]
+        coords = {"lat": lat, "lng": lng}
+        cat_id = get_catid_from_point(coords)
+        upstream_ids = get_upstream_ids([cat_id])
     except:
         return None
 
@@ -138,6 +153,7 @@ if __name__ == "__main__":
     NWIS_STATIONS["NWIS_site_id"] = NWIS_STATIONS["NWIS_site_id"].apply(
         lambda x: "0" * (8 - len(x)) + x
     )
+    print(f"current row count: {len(NWIS_STATIONS)}")
 
     # remove the .0 from the end of the station id
     NWIS_STATIONS["NWIS_site_id"] = NWIS_STATIONS["NWIS_site_id"].apply(
@@ -152,14 +168,14 @@ if __name__ == "__main__":
         geometries = pool.map(process_station, [row for _, row in NWIS_STATIONS.iterrows()])
 
     NWIS_STATIONS["geometry"] = geometries
-
+    print(f"current row count: {len(NWIS_STATIONS)}")
     gdf = gpd.GeoDataFrame(NWIS_STATIONS, geometry="geometry", crs=crs)
     # gdf.to_crs(epsg=4326, inplace=True)
     gdf.to_crs(epsg=4326).to_parquet("stations.parquet")
     # Set up optimized Dask cluster
-    total_cores = 96
+    total_cores = 50
     total_memory = 180e9  # 128 GB in bytes
-    workers = 96
+    workers = 50
     threads_per_worker = total_cores // workers
     memory_per_worker = total_memory // workers
 
